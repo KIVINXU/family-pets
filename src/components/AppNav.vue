@@ -1,0 +1,2 @@
+<script setup lang="ts">import { Home, ListChecks, Gift, PawPrint } from 'lucide-vue-next'; const items = [{to:'/',label:'宠物房',icon:Home},{to:'/tasks',label:'任务',icon:ListChecks},{to:'/rewards',label:'奖励',icon:Gift},{to:'/dex',label:'图鉴',icon:PawPrint}]</script>
+<template><nav class="bottom-nav"><RouterLink v-for="item in items" :key="item.to" :to="item.to"><component :is="item.icon" :size="21"/><span>{{item.label}}</span></RouterLink></nav></template>

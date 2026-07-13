@@ -1,0 +1,28 @@
+# Operating system and editors
+.DS_Store
+Thumbs.db
+*.swp
+*.iml
+*.ipr
+*.iws
+.idea/
+.vscode/
+
+# Node, Vite, tests, and generated output
+node_modules/
+dist/
+coverage/
+test-results/
+playwright-report/
+*.tsbuildinfo
+*.log
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Miscellaneous local caches
+.history/
+.cache/
+.codegraph/

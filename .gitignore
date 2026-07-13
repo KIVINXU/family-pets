@@ -26,3 +26,10 @@ playwright-report/
 .history/
 .cache/
 .codegraph/
+
+# Local AI agent and workflow configuration
+.agent/
+.agents/
+.codex/
+.cursor/
+.trellis/

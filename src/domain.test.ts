@@ -22,6 +22,8 @@ describe("domain seed", () => {
     expect(state.taskCompletions).toEqual([]);
     expect(state.redemptions).toEqual([]);
     expect(state.ledger).toEqual([]);
+    expect(state.claimedLevelMilestones).toEqual([]);
+    expect(state.claimedCompanionRewards).toEqual([]);
   });
 
   it("keeps starter rewards on three positive-feedback horizons", () => {

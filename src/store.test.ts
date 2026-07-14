@@ -12,6 +12,15 @@ function configuredState(pin = "2468") {
   return state;
 }
 
+function legacyState(state = configuredState()) {
+  const {
+    claimedLevelMilestones: _claimedLevels,
+    claimedCompanionRewards: _claimedCompanion,
+    ...legacy
+  } = state;
+  return legacy;
+}
+
 describe("app store rules", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -95,7 +104,7 @@ describe("app store rules", () => {
     other.child.name = "小禾";
     other.progress.pointsBalance = 76;
     const candidate = store.previewRestore(
-      JSON.stringify({ schemaVersion: 2, state: other }),
+      JSON.stringify({ schemaVersion: 2, state: legacyState(other) }),
     );
 
     expect(candidate?.summary.childName).toBe("小禾");
@@ -112,7 +121,7 @@ describe("app store rules", () => {
     const other = configuredState();
     other.child.name = "小禾";
     const candidate = store.previewRestore(
-      JSON.stringify({ schemaVersion: 2, state: other }),
+      JSON.stringify({ schemaVersion: 2, state: legacyState(other) }),
     );
 
     expect(await store.restoreDuringSetup(candidate!, "1357", "1357")).toBe(
@@ -182,6 +191,59 @@ describe("app store rules", () => {
     expect(store.earnedPointsToday).toBe(10);
     store.refreshToday(new Date("2026-07-15T00:01:00"));
     expect(store.approvedTasksToday).toBe(0);
+  });
+
+  it("claims all eligible growth rewards atomically and only once", async () => {
+    const store = useAppStore();
+    store.state = configuredState();
+    store.state.progress.level = 10;
+    store.refreshToday(new Date("2026-07-14T12:00:00"));
+    for (let day = 1; day <= 14; day += 1) {
+      const dateKey = `2026-07-${String(day).padStart(2, "0")}`;
+      store.state.taskCompletions.push({
+        id: `approved-${day}`,
+        taskTemplateId: "task-read",
+        dateKey,
+        status: "approved",
+        submittedAt: `${dateKey}T01:00:00.000Z`,
+        reviewedAt: `${dateKey}T02:00:00.000Z`,
+        bonusPoints: 0,
+        bonusGrowthValue: 0,
+      });
+    }
+
+    expect(store.availableGrowthRewardCount).toBe(8);
+    expect(await store.claimAvailableGrowthRewards()).toBe(true);
+    expect(store.state.progress.pointsBalance).toBe(85);
+    expect(store.state.claimedLevelMilestones).toHaveLength(5);
+    expect(store.state.claimedCompanionRewards).toEqual([
+      "streak-3",
+      "streak-7",
+      "streak-14",
+    ]);
+    expect(
+      store.state.ledger
+        .filter((item) => item.type === "milestone_reward")
+        .map((item) => item.balanceAfter),
+    ).toEqual([10, 20, 35, 55, 85]);
+    expect(store.unlockedDecorations).toHaveLength(3);
+    expect(store.hasStreakDialoguePack).toBe(true);
+    expect(store.availableGrowthRewardCount).toBe(0);
+    expect(await store.claimAvailableGrowthRewards()).toBe(false);
+    expect(store.state.progress.pointsBalance).toBe(85);
+    expect(appRepository.save).toHaveBeenCalledOnce();
+  });
+
+  it("rolls back points, ledger, and claim markers together", async () => {
+    vi.mocked(appRepository.save).mockRejectedValueOnce(new Error("磁盘不可用"));
+    const store = useAppStore();
+    store.state = configuredState();
+    store.state.progress.level = 3;
+
+    expect(await store.claimAvailableGrowthRewards()).toBe(false);
+    expect(store.state.progress.pointsBalance).toBe(0);
+    expect(store.state.ledger).toEqual([]);
+    expect(store.state.claimedLevelMilestones).toEqual([]);
   });
 
   it("carries growth into a level that unlocks a new pet", async () => {

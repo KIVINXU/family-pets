@@ -7,7 +7,7 @@ import { appRepository, CURRENT_SCHEMA_VERSION } from "./repository";
 const STORAGE_KEY = "family_pets_app_state_v1";
 
 async function writeEnvelope(value: unknown) {
-  const db = await openDB("family-pets", 3, {
+  const db = await openDB("family-pets", CURRENT_SCHEMA_VERSION, {
     upgrade(database) {
       if (!database.objectStoreNames.contains("app"))
         database.createObjectStore("app");
@@ -19,15 +19,20 @@ async function writeEnvelope(value: unknown) {
 
 describe("repository schema and backups", () => {
   beforeEach(async () => {
-    const db = await openDB("family-pets", 3);
+    const db = await openDB("family-pets", CURRENT_SCHEMA_VERSION);
     await db.clear("app");
     db.close();
   });
 
-  it("migrates v1/v2 records to v3 and derives setup state from the PIN", async () => {
+  it("migrates v1/v2/v3 records to v4 and derives setup state from the PIN", async () => {
     const state = seedState();
     state.parentPin = "1357";
-    const { setupCompleted: _setupCompleted, ...legacyState } = state;
+    const {
+      setupCompleted: _setupCompleted,
+      claimedLevelMilestones: _claimedLevels,
+      claimedCompanionRewards: _claimedCompanion,
+      ...legacyState
+    } = state;
     const child: Omit<typeof state.child, "currentPetId"> & {
       currentPetId?: string;
     } = { ...state.child };
@@ -41,18 +46,25 @@ describe("repository schema and backups", () => {
 
     expect(loaded.setupCompleted).toBe(true);
     expect(loaded.child.currentPetId).toBe("tuantuan");
-    const db = await openDB("family-pets", 3);
+    const db = await openDB("family-pets", CURRENT_SCHEMA_VERSION);
     const saved = (await db.get("app", STORAGE_KEY)) as {
       schemaVersion: number;
     };
     expect(saved.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+    expect(loaded.claimedLevelMilestones).toEqual([]);
+    expect(loaded.claimedCompanionRewards).toEqual([]);
     db.close();
   });
 
   it("routes legacy reserved-PIN data back to setup without losing progress", async () => {
     const state = seedState();
     state.progress.pointsBalance = 88;
-    const { setupCompleted: _setupCompleted, ...legacyState } = state;
+    const {
+      setupCompleted: _setupCompleted,
+      claimedLevelMilestones: _claimedLevels,
+      claimedCompanionRewards: _claimedCompanion,
+      ...legacyState
+    } = state;
     await writeEnvelope({ schemaVersion: 2, state: legacyState });
 
     const loaded = await appRepository.load();
@@ -71,6 +83,8 @@ describe("repository schema and backups", () => {
 
     expect(parsed.state).not.toHaveProperty("parentPin");
     expect(parsed.state).not.toHaveProperty("setupCompleted");
+    expect(parsed.state).toHaveProperty("claimedLevelMilestones", []);
+    expect(parsed.state).toHaveProperty("claimedCompanionRewards", []);
     expect(raw).not.toContain("1357");
   });
 
@@ -90,8 +104,13 @@ describe("repository schema and backups", () => {
       rewardCount: 3,
     });
 
+    const {
+      claimedLevelMilestones: _claimedLevels,
+      claimedCompanionRewards: _claimedCompanion,
+      ...legacyState
+    } = state;
     const legacyPreview = appRepository.previewBackup(
-      JSON.stringify({ schemaVersion: 2, state }),
+      JSON.stringify({ schemaVersion: 3, state: legacyState }),
     );
     expect(legacyPreview.state.child.name).toBe("安安");
     expect(legacyPreview.state).not.toHaveProperty("parentPin");
@@ -105,8 +124,13 @@ describe("repository schema and backups", () => {
     state.child.currentPetId = "mili";
     state.child.currentPetName = "米粒";
 
+    const {
+      claimedLevelMilestones: _claimedLevels,
+      claimedCompanionRewards: _claimedCompanion,
+      ...legacyState
+    } = state;
     const preview = appRepository.previewBackup(
-      JSON.stringify({ schemaVersion: 2, state }),
+      JSON.stringify({ schemaVersion: 2, state: legacyState }),
     );
 
     expect(preview.state.child.currentPetId).toBe("tuantuan");
@@ -119,8 +143,24 @@ describe("repository schema and backups", () => {
     );
     expect(() =>
       appRepository.previewBackup(
-        JSON.stringify({ schemaVersion: 3, state: { child: {} } }),
+        JSON.stringify({ schemaVersion: 4, state: { child: {} } }),
       ),
     ).toThrow("备份文件字段不完整");
+  });
+
+  it("rejects duplicate or unknown v4 claim identifiers", () => {
+    const state = seedState();
+    const parsed = JSON.parse(appRepository.export(state)) as {
+      schemaVersion: number;
+      state: Record<string, unknown>;
+    };
+    parsed.state.claimedLevelMilestones = ["level-2", "level-2"];
+    expect(() => appRepository.previewBackup(JSON.stringify(parsed))).toThrow(
+      "备份文件字段不完整",
+    );
+    parsed.state.claimedLevelMilestones = ["level-99"];
+    expect(() => appRepository.previewBackup(JSON.stringify(parsed))).toThrow(
+      "备份文件字段不完整",
+    );
   });
 });

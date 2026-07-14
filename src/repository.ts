@@ -9,7 +9,7 @@ import {
 import { DEFAULT_PET, findPet, isPetUnlocked } from "./pets";
 
 const STORAGE_KEY = "family_pets_app_state_v1";
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 const petIdSchema = z.enum(["tuantuan", "paopao", "meimei", "xingya", "mili"]);
 const childSchema = z
@@ -82,16 +82,22 @@ const redemptionSchema = z
     fulfilledAt: z.string().optional(),
   })
   .strict();
-const ledgerEntrySchema = z
+const legacyLedgerTypeSchema = z.enum([
+  "task_reward",
+  "bonus_reward",
+  "redemption_freeze",
+  "redemption_deduct",
+  "redemption_return",
+]);
+const ledgerTypeSchema = z.enum([
+  ...legacyLedgerTypeSchema.options,
+  "milestone_reward",
+]);
+const createLedgerEntrySchema = (type: typeof ledgerTypeSchema | typeof legacyLedgerTypeSchema) =>
+  z
   .object({
     id: z.string(),
-    type: z.enum([
-      "task_reward",
-      "bonus_reward",
-      "redemption_freeze",
-      "redemption_deduct",
-      "redemption_return",
-    ]),
+    type,
     amount: z.number(),
     balanceAfter: z.number(),
     reason: z.string(),
@@ -99,15 +105,35 @@ const ledgerEntrySchema = z
     approvedByParent: z.boolean(),
   })
   .strict();
+const ledgerEntrySchema = createLedgerEntrySchema(ledgerTypeSchema);
+const legacyLedgerEntrySchema = createLedgerEntrySchema(legacyLedgerTypeSchema);
+const levelMilestoneIdSchema = z.enum([
+  "level-2",
+  "level-3",
+  "level-5",
+  "level-7",
+  "level-10",
+]);
+const companionRewardIdSchema = z.enum(["streak-3", "streak-7", "streak-14"]);
+const uniqueArray = <T extends z.ZodType>(schema: T) =>
+  z.array(schema).refine((items) => new Set(items).size === items.length, {
+    message: "领取记录不能重复",
+  });
 
-const familyDataShape = {
+const legacyFamilyDataShape = {
   child: childSchema,
   progress: progressSchema,
   taskTemplates: z.array(taskTemplateSchema),
   taskCompletions: z.array(taskCompletionSchema),
   rewards: z.array(rewardSchema),
   redemptions: z.array(redemptionSchema),
+  ledger: z.array(legacyLedgerEntrySchema),
+};
+const familyDataShape = {
+  ...legacyFamilyDataShape,
   ledger: z.array(ledgerEntrySchema),
+  claimedLevelMilestones: uniqueArray(levelMilestoneIdSchema),
+  claimedCompanionRewards: uniqueArray(companionRewardIdSchema),
 };
 const familyDataSchema = z.object(familyDataShape).strict();
 const appStateSchema = z
@@ -120,9 +146,15 @@ const appStateSchema = z
 const legacyStateSchema = z
   .object({
     setupCompleted: z.boolean().optional(),
-    ...familyDataShape,
+    ...legacyFamilyDataShape,
     child: legacyChildSchema,
     parentPin: z.string().regex(/^\d{4}$/),
+  })
+  .strict();
+const legacyFamilyDataSchema = z
+  .object({
+    ...legacyFamilyDataShape,
+    child: legacyChildSchema,
   })
   .strict();
 const envelopeSchema = z
@@ -134,7 +166,9 @@ const envelopeSchema = z
   })
   .strict();
 
-type LegacyState = z.infer<typeof legacyStateSchema>;
+type NormalizableState = Omit<AppState, "child"> & {
+  child: z.infer<typeof legacyChildSchema>;
+};
 
 export interface BackupSummary {
   exportedAt: string | null;
@@ -152,13 +186,13 @@ export interface BackupCandidate {
   summary: BackupSummary;
 }
 
-const dbPromise = openDB("family-pets", 3, {
+const dbPromise = openDB("family-pets", CURRENT_SCHEMA_VERSION, {
   upgrade(db) {
     if (!db.objectStoreNames.contains("app")) db.createObjectStore("app");
   },
 });
 
-function normalizeSelectedPet<T extends LegacyState | AppState>(candidate: T): AppState {
+function normalizeSelectedPet(candidate: NormalizableState): AppState {
   const requestedPet = findPet(candidate.child.currentPetId);
   const selectedPet =
     requestedPet && isPetUnlocked(requestedPet, candidate.progress.level)
@@ -183,12 +217,23 @@ function normalizeSelectedPet<T extends LegacyState | AppState>(candidate: T): A
   });
 }
 
+function migrateLegacyState(rawState: unknown): AppState {
+  const legacy = legacyStateSchema.parse(rawState);
+  return normalizeSelectedPet({
+    ...legacy,
+    setupCompleted:
+      legacy.parentPin !== RESERVED_PARENT_PIN && (legacy.setupCompleted ?? true),
+    claimedLevelMilestones: [],
+    claimedCompanionRewards: [],
+  });
+}
+
 function parseVersionedState(schemaVersion: number, rawState: unknown): AppState {
   if (schemaVersion === CURRENT_SCHEMA_VERSION) {
     return normalizeSelectedPet(appStateSchema.parse(rawState));
   }
-  if (schemaVersion === 1 || schemaVersion === 2) {
-    return normalizeSelectedPet(legacyStateSchema.parse(rawState));
+  if (schemaVersion === 1 || schemaVersion === 2 || schemaVersion === 3) {
+    return migrateLegacyState(rawState);
   }
   throw new Error("不支持的数据版本");
 }
@@ -232,10 +277,22 @@ export function previewBackup(raw: string): BackupCandidate {
   try {
     if (envelope.schemaVersion === CURRENT_SCHEMA_VERSION) {
       family = familyDataSchema.parse(envelope.state);
+    } else if (
+      envelope.schemaVersion === 1 ||
+      envelope.schemaVersion === 2 ||
+      envelope.schemaVersion === 3
+    ) {
+      const fullState = legacyStateSchema.safeParse(envelope.state);
+      const legacy = fullState.success
+        ? fullState.data
+        : {
+            ...legacyFamilyDataSchema.parse(envelope.state),
+            setupCompleted: true,
+            parentPin: "0000",
+          };
+      family = toFamilyData(migrateLegacyState(legacy));
     } else {
-      family = toFamilyData(
-        parseVersionedState(envelope.schemaVersion, envelope.state),
-      );
+      throw new Error("不支持的数据版本");
     }
   } catch (cause) {
     if (cause instanceof Error && cause.message === "不支持的数据版本")

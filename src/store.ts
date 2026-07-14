@@ -27,6 +27,14 @@ import {
   type Redemption,
   type TaskCompletion,
 } from "./domain";
+import {
+  availableCompanionRewards as findAvailableCompanionRewards,
+  availableLevelMilestones as findAvailableLevelMilestones,
+  calculateCompanionStreaks,
+  newlyReachedWeeklyCheer,
+  nextCompanionReward as findNextCompanionReward,
+  unlockedDecorations as findUnlockedDecorations,
+} from "./growth-rewards";
 
 export const PARENT_SESSION_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -81,7 +89,9 @@ export const useAppStore = defineStore("app", () => {
       .filter(
         (item) =>
           todayKey(new Date(item.createdAt)) === currentDateKey.value &&
-          (item.type === "task_reward" || item.type === "bonus_reward"),
+          (item.type === "task_reward" ||
+            item.type === "bonus_reward" ||
+            item.type === "milestone_reward"),
       )
       .reduce((sum, item) => sum + item.amount, 0),
   );
@@ -94,6 +104,43 @@ export const useAppStore = defineStore("app", () => {
   const unfulfilledRedemptions = computed(() =>
     state.value.redemptions.filter(
       (item) => item.status === "approved" && !item.fulfilledAt,
+    ),
+  );
+  const companionStreaks = computed(() =>
+    calculateCompanionStreaks(
+      state.value.taskCompletions,
+      currentDateKey.value,
+    ),
+  );
+  const currentCompanionStreak = computed(() => companionStreaks.value.current);
+  const longestCompanionStreak = computed(() => companionStreaks.value.longest);
+  const availableLevelMilestones = computed(() =>
+    findAvailableLevelMilestones(
+      state.value.progress.level,
+      state.value.claimedLevelMilestones,
+    ),
+  );
+  const availableCompanionRewards = computed(() =>
+    findAvailableCompanionRewards(
+      longestCompanionStreak.value,
+      state.value.claimedCompanionRewards,
+    ),
+  );
+  const availableGrowthRewardCount = computed(
+    () =>
+      availableLevelMilestones.value.length +
+      availableCompanionRewards.value.length,
+  );
+  const unlockedDecorations = computed(() =>
+    findUnlockedDecorations(state.value.claimedCompanionRewards),
+  );
+  const hasStreakDialoguePack = computed(() =>
+    state.value.claimedCompanionRewards.includes("streak-14"),
+  );
+  const nextCompanionReward = computed(() =>
+    findNextCompanionReward(
+      currentCompanionStreak.value,
+      state.value.claimedCompanionRewards,
     ),
   );
   const completionFor = (taskId: string) =>
@@ -254,6 +301,10 @@ export const useAppStore = defineStore("app", () => {
     );
     if (!task) return;
     const previousLevel = state.value.progress.level;
+    const previousLongestStreak = calculateCompanionStreaks(
+      previous.taskCompletions,
+      currentDateKey.value,
+    ).longest;
     const points = task.pointsReward + bonusPoints,
       growth = task.growthReward + bonusGrowthValue;
     const totalGrowth = state.value.progress.growthValue + growth;
@@ -295,21 +346,93 @@ export const useAppStore = defineStore("app", () => {
           pet.unlockLevel > previousLevel &&
           pet.unlockLevel <= state.value.progress.level,
       );
+      const nextLongestStreak = calculateCompanionStreaks(
+        state.value.taskCompletions,
+        currentDateKey.value,
+      ).longest;
+      const weeklyCheer = newlyReachedWeeklyCheer(
+        previousLongestStreak,
+        nextLongestStreak,
+      );
+      const levelUpMessage = newlyUnlocked.length
+        ? `升级啦！新伙伴${newlyUnlocked.map((pet) => pet.name).join("、")}已解锁`
+        : `升级啦！现在是 ${state.value.progress.level} 级`;
       petFeedback.value =
         levelUps > 0
           ? {
               kind: "level_up",
-              message: newlyUnlocked.length
-                ? `升级啦！新伙伴${newlyUnlocked.map((pet) => pet.name).join("、")}已解锁`
-                : `升级啦！现在是 ${state.value.progress.level} 级`,
+              message: weeklyCheer
+                ? `${levelUpMessage}，也连续陪伴 ${weeklyCheer} 天啦`
+                : levelUpMessage,
               id: uid("feedback"),
             }
-          : {
+          : weeklyCheer
+            ? {
+                kind: "happy",
+                message: `我们已经连续陪伴 ${weeklyCheer} 天啦，每一天都很珍贵`,
+                id: uid("feedback"),
+              }
+            : {
               kind: "happy",
               message: `${task.title}通过啦，谢谢你的努力`,
               id: uid("feedback"),
             };
     }
+  }
+  async function claimAvailableGrowthRewards() {
+    const levelRewards = findAvailableLevelMilestones(
+      state.value.progress.level,
+      state.value.claimedLevelMilestones,
+    );
+    const companionRewards = findAvailableCompanionRewards(
+      calculateCompanionStreaks(
+        state.value.taskCompletions,
+        currentDateKey.value,
+      ).longest,
+      state.value.claimedCompanionRewards,
+    );
+    if (!levelRewards.length && !companionRewards.length) {
+      notify("现在没有待领取的成长礼物", "info");
+      return false;
+    }
+
+    const previous = snapshot();
+    for (const milestone of levelRewards) {
+      state.value.progress.pointsBalance += milestone.points;
+      const petName = milestone.petId ? findPet(milestone.petId)?.name : undefined;
+      state.value.ledger.push(
+        ledger(
+          "milestone_reward",
+          milestone.points,
+          `成长里程碑：Lv.${milestone.level}${petName ? ` · ${petName}` : ""}`,
+          false,
+        ),
+      );
+    }
+    state.value.progress.updatedAt = new Date().toISOString();
+    state.value.claimedLevelMilestones = [
+      ...new Set([
+        ...state.value.claimedLevelMilestones,
+        ...levelRewards.map((reward) => reward.id),
+      ]),
+    ];
+    state.value.claimedCompanionRewards = [
+      ...new Set([
+        ...state.value.claimedCompanionRewards,
+        ...companionRewards.map((reward) => reward.id),
+      ]),
+    ];
+    if (!(await persist(previous, "成长礼物领取成功"))) return false;
+
+    const points = levelRewards.reduce((sum, reward) => sum + reward.points, 0);
+    petFeedback.value = {
+      kind: levelRewards.length ? "level_up" : "happy",
+      message: points
+        ? `成长礼物打开啦，收到了 ${points} 积分`
+        : "新装饰已经出现在房间里啦",
+      id: uid("feedback"),
+    };
+    return true;
   }
   async function rejectTask(id: string, note: string) {
     const previous = snapshot();
@@ -767,6 +890,14 @@ export const useAppStore = defineStore("app", () => {
     approvedTasksToday,
     pendingTasksToday,
     earnedPointsToday,
+    currentCompanionStreak,
+    longestCompanionStreak,
+    availableLevelMilestones,
+    availableCompanionRewards,
+    availableGrowthRewardCount,
+    unlockedDecorations,
+    hasStreakDialoguePack,
+    nextCompanionReward,
     pendingRedemptions,
     unfulfilledRedemptions,
     completionFor,
@@ -781,6 +912,7 @@ export const useAppStore = defineStore("app", () => {
     recordParentVisibility,
     submitTask,
     approveTask,
+    claimAvailableGrowthRewards,
     rejectTask,
     requestReward,
     approveRedemption,

@@ -15,13 +15,13 @@ function configuredState(pin = DEFAULT_TEST_PIN) {
 
 async function installAppState(
   page: Page,
-  state: AppState,
-  schemaVersion = 3,
+  state: unknown,
+  schemaVersion = 4,
 ) {
   await page.goto("/");
   await page.evaluate(
     async ({ key, state: nextState, schemaVersion: version }) => {
-      const request = indexedDB.open("family-pets", 3);
+      const request = indexedDB.open("family-pets", 4);
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
@@ -45,6 +45,15 @@ async function installAppState(
     { key: APP_STATE_KEY, state, schemaVersion },
   );
   await page.reload();
+}
+
+function asLegacyState(state: AppState) {
+  const {
+    claimedLevelMilestones: _claimedLevels,
+    claimedCompanionRewards: _claimedCompanion,
+    ...legacy
+  } = state;
+  return legacy;
 }
 
 async function enterPin(page: Page, pin: string) {
@@ -104,7 +113,7 @@ test("legacy 2580 data is gated by setup without losing progress", async ({
 }) => {
   const state = seedState();
   state.progress.pointsBalance = 88;
-  await installAppState(page, state, 2);
+  await installAppState(page, asLegacyState(state), 2);
 
   await expect(page).toHaveURL(/\/setup$/);
   await page.getByLabel("孩子昵称").fill("安安");
@@ -131,7 +140,7 @@ test("setup can preview a backup and restore it with a new device PIN", async ({
     mimeType: "application/json",
     buffer: Buffer.from(
       JSON.stringify({
-        schemaVersion: 3,
+        schemaVersion: 4,
         exportedAt: "2026-07-14T08:00:00.000Z",
         state: family,
       }),
@@ -168,7 +177,7 @@ test("invalid or cancelled setup restore never replaces the fresh state", async 
     name: "valid.json",
     mimeType: "application/json",
     buffer: Buffer.from(
-      JSON.stringify({ schemaVersion: 3, exportedAt: new Date().toISOString(), state: family }),
+      JSON.stringify({ schemaVersion: 4, exportedAt: new Date().toISOString(), state: family }),
     ),
   });
   await page.getByRole("button", { name: "取消", exact: true }).click();
@@ -288,7 +297,7 @@ test.describe("configured family flows", () => {
       mimeType: "application/json",
       buffer: Buffer.from(
         JSON.stringify({
-          schemaVersion: 3,
+          schemaVersion: 4,
           exportedAt: "2026-07-14T08:00:00.000Z",
           state: family,
         }),
@@ -381,6 +390,74 @@ test.describe("configured family flows", () => {
     expect(viewport).not.toBeNull();
     expect(box!.width).toBeLessThanOrEqual(viewport!.width);
     expect(box!.height).toBeLessThanOrEqual(viewport!.height);
+  });
+
+  test("growth gifts aggregate, survive closing, and claim only once", async ({
+    page,
+  }) => {
+    await page.clock.install({ time: new Date("2026-07-14T12:00:00+08:00") });
+    const state = configuredState();
+    state.progress.level = 10;
+    for (let day = 1; day <= 14; day += 1) {
+      const dateKey = `2026-07-${String(day).padStart(2, "0")}`;
+      state.taskCompletions.push({
+        id: `growth-${day}`,
+        taskTemplateId: "task-read",
+        dateKey,
+        status: "approved",
+        submittedAt: `${dateKey}T01:00:00.000Z`,
+        reviewedAt: `${dateKey}T02:00:00.000Z`,
+        bonusPoints: 0,
+        bonusGrowthValue: 0,
+      });
+    }
+    await installAppState(page, state);
+
+    const dialog = page.getByTestId("growth-reward-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator("li")).toHaveCount(8);
+    await dialog.getByRole("button", { name: "稍后领取" }).click();
+    await expect(page.getByTestId("growth-gift-button")).toBeVisible();
+    await page.getByTestId("growth-gift-button").click();
+    await dialog.getByRole("button", { name: "打开全部礼物" }).click();
+
+    await expect(page.getByText("85 积分", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("room-decoration-streak-3")).toBeVisible();
+    await expect(page.getByTestId("room-decoration-streak-7")).toBeVisible();
+    await expect(page.getByTestId("room-decoration-streak-14")).toBeVisible();
+    await expect(page.getByTestId("companion-streak")).toContainText("14 天");
+    await expect(page.getByTestId("growth-gift-button")).toHaveCount(0);
+
+    await page.reload();
+    await expect(page.getByTestId("room-decoration-streak-3")).toBeVisible();
+    await expect(page.getByTestId("growth-reward-dialog")).toHaveCount(0);
+    await expect(page.getByText("85 积分", { exact: true })).toBeVisible();
+  });
+
+  test("night ambient dialogue stays restful even with pending tasks", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      Math.random = () => 0;
+    });
+    await page.clock.install({ time: new Date("2026-07-14T22:00:00+08:00") });
+    const state = configuredState();
+    state.taskCompletions.push({
+      id: "night-pending",
+      taskTemplateId: "task-read",
+      dateKey: "2026-07-14",
+      status: "pending_review",
+      submittedAt: "2026-07-14T12:00:00.000Z",
+      bonusPoints: 0,
+      bonusGrowthValue: 0,
+    });
+    await installAppState(page, state);
+    await page.clock.fastForward(8_100);
+
+    const speech = page.locator(".pet-speech");
+    await expect(speech).toBeVisible();
+    await expect(speech).toContainText(/晚安|休息|好梦|夜深/);
+    await expect(speech).not.toContainText(/还没|来不及|待确认/);
   });
 
   test("backup reminder appears after seven days and can be dismissed locally", async ({

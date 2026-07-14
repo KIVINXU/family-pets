@@ -101,6 +101,14 @@ select {
   height: 100%;
   object-fit: cover;
 }
+.room-decoration {
+  position: absolute;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+  filter: drop-shadow(0 10px 10px #554b2b1f);
+  animation: decoration-arrive 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
 .scene-header {
   position: absolute;
   top: 24px;
@@ -111,6 +119,7 @@ select {
   align-items: flex-start;
   color: #fff;
   text-shadow: 0 2px 12px #26352e55;
+  z-index: 4;
 }
 .scene-header small,
 .page-header small,
@@ -139,6 +148,7 @@ select {
   position: absolute;
   inset: 18% 15% 12%;
   background: transparent;
+  z-index: 3;
 }
 .pet-button img {
   height: 100%;
@@ -164,6 +174,7 @@ select {
   left: 24px;
   display: flex;
   gap: 10px;
+  z-index: 4;
 }
 .scene-stats span {
   display: flex;
@@ -176,6 +187,78 @@ select {
 }
 .home-summary {
   padding: 24px 4px;
+}
+.scene-gift-button {
+  position: absolute;
+  z-index: 5;
+  top: 82px;
+  right: 22px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 12px;
+  border: 1px solid #f0d998;
+  border-radius: 999px;
+  color: #5c4c24;
+  background: #fff8dce8;
+  box-shadow: 0 10px 24px #594f2a20;
+  font-weight: 900;
+  backdrop-filter: blur(8px);
+}
+.scene-gift-button span {
+  display: grid;
+  place-items: center;
+  min-width: 23px;
+  height: 23px;
+  padding: 0 6px;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--accent);
+  font-size: 12px;
+}
+.scene-gift-button:active {
+  transform: scale(0.98);
+}
+.companion-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  padding: 17px 18px;
+  border: 1px solid #d7e6d6;
+  border-radius: 20px;
+  background: #f7fbf3;
+  box-shadow: inset 0 1px 0 #ffffffcc;
+}
+.companion-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 15px;
+  color: #4f795f;
+  background: #deeedb;
+}
+.companion-content > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.companion-content small,
+.companion-content p {
+  color: var(--muted);
+}
+.companion-content strong {
+  color: #355c45;
+  font-size: 22px;
+}
+.companion-content p {
+  margin: 4px 0 10px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.companion-content progress {
+  height: 9px;
 }
 .today-overview strong:last-child {
   color: var(--accent);
@@ -744,6 +827,122 @@ progress {
 .confirm-dialog button.danger {
   background: #b8554b;
 }
+.growth-dialog-backdrop {
+  background: #17251fa6;
+}
+.growth-dialog {
+  width: min(100%, 520px);
+  max-height: calc(100dvh - 36px);
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid #f0e3bd;
+  border-radius: 26px;
+  color: var(--ink);
+  background: #fffdf5;
+  box-shadow:
+    inset 0 1px 0 #ffffff,
+    0 24px 70px #15231d55;
+  animation: gift-dialog-arrive 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.growth-dialog-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 13px;
+}
+.growth-dialog-header small {
+  color: var(--accent);
+  font-weight: 900;
+}
+.growth-dialog-header h2 {
+  margin: 4px 0 0;
+  font-size: clamp(23px, 5vw, 30px);
+  line-height: 1.15;
+}
+.growth-dialog-mark,
+.reward-list-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: #6b5926;
+  background: #ffedaf;
+}
+.growth-dialog-mark {
+  width: 46px;
+  height: 46px;
+  border-radius: 16px;
+}
+.growth-dialog-close {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  color: var(--muted);
+  background: #edf3ed;
+}
+.growth-dialog-intro {
+  margin: 16px 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.growth-reward-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-block: 1px solid #e0e9dc;
+}
+.growth-reward-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 2px;
+}
+.growth-reward-list li + li {
+  border-top: 1px solid #e8eee5;
+}
+.reward-list-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 13px;
+}
+.reward-list-icon.room {
+  color: #406b50;
+  background: #deeedb;
+}
+.reward-list-icon svg {
+  width: 19px;
+}
+.growth-reward-list div {
+  display: grid;
+  gap: 3px;
+}
+.growth-reward-list small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+.growth-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+.growth-dialog footer button {
+  padding: 11px 15px;
+  border-radius: 13px;
+  color: #fff;
+  background: var(--accent);
+  font-weight: 900;
+}
+.growth-dialog footer button.secondary {
+  color: var(--ink);
+  background: #edf3ed;
+}
+.growth-dialog button:active {
+  transform: scale(0.98);
+}
 .pwa-prompt {
   position: fixed;
   z-index: 30;
@@ -1299,6 +1498,18 @@ progress {
     transform: translateY(-7px);
   }
 }
+@keyframes decoration-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+}
+@keyframes gift-dialog-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+}
 @media (max-width: 620px) {
   .pet-scene {
     height: 64dvh;
@@ -1308,6 +1519,27 @@ progress {
   .scene-header {
     top: 18px;
     left: 18px;
+  }
+  .scene-gift-button {
+    top: 72px;
+    right: 14px;
+    padding: 9px 11px;
+  }
+  .decoration-streak-3 {
+    left: 1% !important;
+    top: 70% !important;
+    width: 27% !important;
+  }
+  .decoration-streak-7 {
+    left: auto !important;
+    right: 1% !important;
+    top: 68% !important;
+    width: 23% !important;
+  }
+  .decoration-streak-14 {
+    left: 29% !important;
+    top: 18% !important;
+    width: 42% !important;
   }
   .pet-button {
     inset: 19% 10% 10%;
@@ -1387,6 +1619,22 @@ progress {
   }
   .confirm-dialog footer {
     flex-direction: column-reverse;
+  }
+  .growth-dialog {
+    padding: 20px;
+    border-radius: 22px;
+  }
+  .growth-dialog-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .growth-dialog-mark {
+    display: none;
+  }
+  .growth-dialog footer {
+    flex-direction: column-reverse;
+  }
+  .growth-dialog footer button {
+    width: 100%;
   }
   .confirm-dialog footer button {
     width: 100%;

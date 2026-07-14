@@ -24,6 +24,16 @@ test("production PWA keeps the child, review, reward, and PIN flows offline", as
   await expect
     .poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller)))
     .toBe(true);
+  const decorationAssetsCached = await page.evaluate(async () =>
+    Promise.all(
+      [
+        "/assets/objects/plant.png",
+        "/assets/objects/night-light.png",
+        "/assets/objects/star-wall.png",
+      ].map(async (path) => Boolean(await caches.match(new URL(path, location.href)))),
+    ),
+  );
+  expect(decorationAssetsCached).toEqual([true, true, true]);
   await context.setOffline(true);
 
   await page.goto("/tasks");

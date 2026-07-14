@@ -79,7 +79,11 @@ onBeforeUnmount(() => store.setFormDirty("parent-center", false));
 const filteredLedger = computed(() =>
   ledger.value.filter((item) => {
     if (ledgerFilter.value === "earn")
-      return item.type === "task_reward" || item.type === "bonus_reward";
+      return (
+        item.type === "task_reward" ||
+        item.type === "bonus_reward" ||
+        item.type === "milestone_reward"
+      );
     if (ledgerFilter.value === "redeem")
       return item.type.startsWith("redemption_");
     return true;
@@ -117,7 +121,9 @@ const weeklyPoints = computed(() =>
     .filter(
       (item) =>
         isThisWeek(item.createdAt) &&
-        (item.type === "task_reward" || item.type === "bonus_reward"),
+        (item.type === "task_reward" ||
+          item.type === "bonus_reward" ||
+          item.type === "milestone_reward"),
     )
     .reduce((sum, item) => sum + item.amount, 0),
 );

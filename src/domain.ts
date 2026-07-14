@@ -2,9 +2,17 @@ import type { PetId } from "./pets";
 
 export type TaskStatus = "pending_review" | "approved" | "rejected";
 export type RedemptionStatus = "pending" | "approved" | "rejected";
+export type LevelMilestoneId =
+  | "level-2"
+  | "level-3"
+  | "level-5"
+  | "level-7"
+  | "level-10";
+export type CompanionRewardId = "streak-3" | "streak-7" | "streak-14";
 export type LedgerType =
   | "task_reward"
   | "bonus_reward"
+  | "milestone_reward"
   | "redemption_freeze"
   | "redemption_deduct"
   | "redemption_return";
@@ -84,6 +92,8 @@ export interface AppState {
   rewards: Reward[];
   redemptions: Redemption[];
   ledger: LedgerEntry[];
+  claimedLevelMilestones: LevelMilestoneId[];
+  claimedCompanionRewards: CompanionRewardId[];
   parentPin: string;
 }
 
@@ -189,6 +199,8 @@ export const seedState = (): AppState => ({
   ],
   redemptions: [],
   ledger: [],
+  claimedLevelMilestones: [],
+  claimedCompanionRewards: [],
   parentPin: RESERVED_PARENT_PIN,
 });
 

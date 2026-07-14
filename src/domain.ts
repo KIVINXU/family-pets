@@ -76,6 +76,7 @@ export interface LedgerEntry {
   approvedByParent: boolean;
 }
 export interface AppState {
+  setupCompleted: boolean;
   child: ChildProfile;
   progress: ChildProgress;
   taskTemplates: TaskTemplate[];
@@ -86,7 +87,26 @@ export interface AppState {
   parentPin: string;
 }
 
+export type FamilyData = Omit<AppState, "parentPin" | "setupCompleted">;
+
+export const RESERVED_PARENT_PIN = "2580";
+
+export function parentPinValidationError(
+  nextPin: string,
+  confirmPin?: string,
+  currentPin?: string,
+) {
+  if (!/^\d{4}$/.test(nextPin)) return "PIN 必须是 4 位数字";
+  if (nextPin === RESERVED_PARENT_PIN) return "这个 PIN 不能使用，请换一个";
+  if (confirmPin !== undefined && nextPin !== confirmPin)
+    return "两次输入的 PIN 不一致";
+  if (currentPin !== undefined && nextPin === currentPin)
+    return "新 PIN 不能和当前 PIN 相同";
+  return "";
+}
+
 export const seedState = (): AppState => ({
+  setupCompleted: false,
   child: {
     id: "child-default",
     name: "小满",
@@ -95,13 +115,13 @@ export const seedState = (): AppState => ({
     currentPetName: "团团",
   },
   progress: {
-    level: 2,
-    growthValue: 42,
+    level: 1,
+    growthValue: 0,
     growthTarget: 100,
-    totalGrowthValue: 142,
-    moodValue: 86,
-    energyValue: 78,
-    pointsBalance: 65,
+    totalGrowthValue: 0,
+    moodValue: 80,
+    energyValue: 80,
+    pointsBalance: 0,
     frozenPoints: 0,
     updatedAt: new Date().toISOString(),
   },
@@ -149,30 +169,30 @@ export const seedState = (): AppState => ({
       id: "reward-story",
       title: "多讲一个睡前故事",
       description: "今晚多选一本喜欢的故事",
-      pointsCost: 30,
+      pointsCost: 20,
       available: true,
     },
     {
       id: "reward-cartoon",
       title: "动画片 20 分钟",
       description: "选择一集想看的动画片",
-      pointsCost: 50,
+      pointsCost: 60,
       available: true,
     },
     {
       id: "reward-outing",
       title: "周末亲子活动",
       description: "一起决定周末的小冒险",
-      pointsCost: 120,
+      pointsCost: 160,
       available: true,
     },
   ],
   redemptions: [],
   ledger: [],
-  parentPin: "2580",
+  parentPin: RESERVED_PARENT_PIN,
 });
 
-export const todayKey = () => new Date().toLocaleDateString("sv-SE");
+export const todayKey = (date = new Date()) => date.toLocaleDateString("sv-SE");
 export const uid = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 

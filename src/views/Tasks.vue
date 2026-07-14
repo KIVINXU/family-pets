@@ -6,7 +6,9 @@ import { isTaskScheduled, type TaskStatus } from "../domain";
 
 const store = useAppStore();
 const scheduledTasks = computed(() =>
-  store.state.taskTemplates.filter((task) => isTaskScheduled(task)),
+  store.state.taskTemplates.filter((task) =>
+    isTaskScheduled(task, new Date(`${store.currentDateKey}T12:00:00`)),
+  ),
 );
 const statusText: Record<TaskStatus, string> = {
   pending_review: "等待家长确认",
@@ -21,9 +23,12 @@ const statusClass = (status?: TaskStatus) =>
   <main class="page content-page">
     <header class="page-header">
       <small>今日清单</small>
-      <h1>和团团一起完成</h1>
+      <h1>和{{ store.state.child.currentPetName }}一起完成</h1>
       <p>做完后请家长确认，奖励才会到账。</p>
     </header>
+    <p v-if="!scheduledTasks.length" class="empty-state">
+      今天没有安排任务，和{{ store.state.child.currentPetName }}轻松玩一会儿吧。
+    </p>
     <section class="list">
       <article v-for="task in scheduledTasks" :key="task.id" class="task-row">
         <div class="task-icon"><Check /></div>

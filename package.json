@@ -9,14 +9,16 @@
     "preview": "vite preview",
     "type-check": "vue-tsc --noEmit",
     "test": "vitest run src",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:pwa": "npm run build && playwright test --config playwright.pwa.config.ts"
   },
   "dependencies": {
     "idb": "^8.0.3",
     "lucide-vue-next": "^0.577.0",
     "pinia": "^3.0.4",
     "vue": "^3.5.39",
-    "vue-router": "^5.1.0"
+    "vue-router": "^5.1.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

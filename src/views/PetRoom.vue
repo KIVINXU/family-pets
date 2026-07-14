@@ -125,17 +125,15 @@ onBeforeUnmount(() => {
           :max="store.state.progress.growthTarget"
         />
       </div>
-      <div class="stat-strip">
+      <div class="stat-strip today-overview" aria-label="今日概览">
         <div>
-          <small>心情</small
-          ><strong>{{ store.state.progress.moodValue }}</strong>
+          <small>今天完成</small><strong>{{ store.approvedTasksToday }}</strong>
         </div>
         <div>
-          <small>活力</small
-          ><strong>{{ store.state.progress.energyValue }}</strong>
+          <small>待家长确认</small><strong>{{ store.pendingTasksToday }}</strong>
         </div>
         <div>
-          <small>待确认</small><strong>{{ store.pendingTasks.length }}</strong>
+          <small>今天获得</small><strong>+{{ store.earnedPointsToday }}</strong>
         </div>
       </div>
       <div class="quick-links">

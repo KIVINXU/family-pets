@@ -1,6 +1,5 @@
-@import url("https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;800;900&display=swap");
 :root {
-  font-family: "Nunito Sans", ui-sans-serif, sans-serif;
+  font-family: ui-rounded, "Microsoft YaHei", "PingFang SC", sans-serif;
   color: #26352e;
   background: #f4faf2;
   font-synthesis: none;
@@ -38,6 +37,12 @@ button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
+button,
+.button,
+input,
+select {
+  min-height: 44px;
+}
 .app-root {
   min-height: 100dvh;
   padding-bottom: 86px;
@@ -74,6 +79,11 @@ button:disabled {
   color: #a34d43;
   text-align: center;
   font-weight: 700;
+}
+.form-help,
+.backup-time {
+  color: var(--muted);
+  font-size: 13px;
 }
 .pet-scene {
   position: relative;
@@ -166,6 +176,9 @@ button:disabled {
 }
 .home-summary {
   padding: 24px 4px;
+}
+.today-overview strong:last-child {
+  color: var(--accent);
 }
 .progress-row {
   padding: 18px 0;
@@ -624,6 +637,159 @@ progress {
 }
 .pin-page {
   max-width: 520px;
+  text-align: center;
+}
+.text-link {
+  display: inline-block;
+  margin-top: 22px;
+  color: var(--accent);
+  font-weight: 800;
+}
+.setup-page {
+  max-width: 560px;
+  padding-top: clamp(24px, 7vh, 72px);
+}
+.setup-card,
+.dialog-fields {
+  display: grid;
+  gap: 14px;
+}
+.setup-card {
+  padding: 22px;
+  border: 1px solid #d8e5d8;
+  border-radius: 24px;
+  background: #fffdf5;
+  box-shadow: 0 18px 42px #26352e12;
+}
+.setup-card label,
+.dialog-fields label,
+.dialog-pin-field {
+  display: grid;
+  gap: 7px;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 800;
+}
+.setup-card input,
+.dialog-fields input,
+.dialog-pin-field input {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid #cddccd;
+  border-radius: 12px;
+  color: var(--ink);
+  background: #fff;
+}
+.setup-card > button {
+  padding: 12px 16px;
+  border-radius: 13px;
+  color: #fff;
+  background: var(--accent);
+  font-weight: 900;
+}
+.restore-entry {
+  width: 100%;
+  margin-top: 14px;
+}
+.dialog-backdrop {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: #17251f99;
+}
+.confirm-dialog {
+  width: min(100%, 480px);
+  max-height: calc(100dvh - 36px);
+  overflow: auto;
+  padding: 22px;
+  border-radius: 22px;
+  color: var(--ink);
+  background: #fffdf5;
+  box-shadow: 0 24px 70px #15231d55;
+}
+.confirm-dialog header small {
+  color: var(--accent);
+  font-weight: 900;
+}
+.confirm-dialog h2 {
+  margin: 5px 0 10px;
+}
+.confirm-dialog > p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+.confirm-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+.confirm-dialog button,
+.pwa-prompt button {
+  padding: 10px 14px;
+  border-radius: 12px;
+  color: #fff;
+  background: var(--accent);
+  font-weight: 800;
+}
+.confirm-dialog button.secondary,
+.pwa-prompt button.secondary,
+.backup-reminder button.secondary {
+  color: var(--ink);
+  background: #edf3ed;
+}
+.confirm-dialog button.danger {
+  background: #b8554b;
+}
+.pwa-prompt {
+  position: fixed;
+  z-index: 30;
+  right: 16px;
+  bottom: 94px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(calc(100% - 32px), 560px);
+  padding: 14px;
+  border: 1px solid #c9ddce;
+  border-radius: 17px;
+  background: #fffdf5;
+  box-shadow: 0 16px 38px #26352e28;
+}
+.pwa-prompt div,
+.backup-reminder div {
+  display: grid;
+  gap: 3px;
+  flex: 1;
+}
+.pwa-prompt small,
+.backup-reminder small {
+  color: var(--muted);
+}
+.backup-reminder {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid #ead69b;
+  border-radius: 15px;
+  background: #fff8df;
+}
+.backup-reminder button {
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-weight: 800;
+}
+.empty-state {
+  padding: 22px;
+  border: 1px dashed #bfd4c3;
+  border-radius: 18px;
+  color: var(--muted);
+  background: #fffdf5;
   text-align: center;
 }
 .pin-page .page-header {
@@ -1209,5 +1375,35 @@ progress {
   .scene-stats {
     left: 15px;
     bottom: 15px;
+  }
+  .pwa-prompt {
+    left: 14px;
+    right: 14px;
+    bottom: 82px;
+    flex-wrap: wrap;
+  }
+  .pwa-prompt div {
+    flex-basis: 100%;
+  }
+  .confirm-dialog footer {
+    flex-direction: column-reverse;
+  }
+  .confirm-dialog footer button {
+    width: 100%;
+  }
+  .backup-reminder {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

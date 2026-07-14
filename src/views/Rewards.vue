@@ -24,7 +24,7 @@ const buttonText = (reward: Reward) => {
 <template>
   <main class="page content-page">
     <header class="page-header reward-header">
-      <small>团团的小商店</small>
+      <small>{{ store.state.child.currentPetName }}的小商店</small>
       <h1>把努力变成期待</h1>
       <div class="balance">
         <strong>{{ store.availablePoints }}</strong

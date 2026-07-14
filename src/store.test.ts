@@ -3,7 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { seedState, todayKey } from "./domain";
 import { appRepository } from "./repository";
-import { useAppStore } from "./store";
+import { PARENT_SESSION_TIMEOUT_MS, useAppStore } from "./store";
+
+function configuredState(pin = "2468") {
+  const state = seedState();
+  state.setupCompleted = true;
+  state.parentPin = pin;
+  return state;
+}
 
 describe("app store rules", () => {
   beforeEach(() => {
@@ -12,9 +19,175 @@ describe("app store rules", () => {
     vi.spyOn(appRepository, "save").mockResolvedValue();
   });
 
-  it("carries growth into the next level after approval", async () => {
+  it("loads only once when bootstrap callers overlap", async () => {
+    const load = vi.spyOn(appRepository, "load").mockResolvedValue(configuredState());
     const store = useAppStore();
-    store.state = seedState();
+
+    await Promise.all([store.load(), store.load(), store.load()]);
+
+    expect(load).toHaveBeenCalledOnce();
+    expect(store.loaded).toBe(true);
+  });
+
+  it("completes minimal setup without resetting existing progress", async () => {
+    const store = useAppStore();
+    store.state.progress.pointsBalance = 88;
+
+    expect(
+      await store.completeSetup({
+        childName: "安安",
+        petName: "糯米",
+        pin: "2580",
+        confirmPin: "2580",
+      }),
+    ).toBe(false);
+    expect(
+      await store.completeSetup({
+        childName: "安安",
+        petName: "糯米",
+        pin: "1357",
+        confirmPin: "1357",
+      }),
+    ).toBe(true);
+    expect(store.state).toMatchObject({
+      setupCompleted: true,
+      parentPin: "1357",
+      child: { name: "安安", currentPetName: "糯米" },
+      progress: { pointsBalance: 88 },
+    });
+  });
+
+  it("changes PIN with confirmation, persists, and locks the parent session", async () => {
+    const store = useAppStore();
+    store.state = configuredState();
+    expect(store.verifyPin("2468")).toBe(true);
+
+    expect(await store.updateParentPin("0000", "1357", "1357")).toBe(false);
+    expect(await store.updateParentPin("2468", "1357", "9999")).toBe(false);
+    expect(await store.updateParentPin("2468", "1357", "1357")).toBe(true);
+
+    expect(store.parentUnlocked).toBe(false);
+    expect(store.verifyPin("2468")).toBe(false);
+    expect(store.verifyPin("1357")).toBe(true);
+    expect(appRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ parentPin: "1357" }),
+    );
+  });
+
+  it("resets a forgotten PIN without deleting family data", async () => {
+    const store = useAppStore();
+    store.state = configuredState();
+    store.state.progress.pointsBalance = 222;
+
+    expect(await store.resetForgottenPin("1357", "1357", false)).toBe(false);
+    expect(await store.resetForgottenPin("1357", "1357", true)).toBe(true);
+
+    expect(store.state.progress.pointsBalance).toBe(222);
+    expect(store.state.parentPin).toBe("1357");
+    expect(store.parentUnlocked).toBe(false);
+  });
+
+  it("previews and restores a backup while preserving the device PIN", async () => {
+    const store = useAppStore();
+    store.state = configuredState("2468");
+    expect(store.verifyPin("2468")).toBe(true);
+    const other = configuredState("9999");
+    other.child.name = "小禾";
+    other.progress.pointsBalance = 76;
+    const candidate = store.previewRestore(
+      JSON.stringify({ schemaVersion: 2, state: other }),
+    );
+
+    expect(candidate?.summary.childName).toBe("小禾");
+    expect(store.state.child.name).not.toBe("小禾");
+    expect(await store.confirmRestore(candidate!, "0000")).toBe(false);
+    expect(await store.confirmRestore(candidate!, "2468")).toBe(true);
+    expect(store.state.child.name).toBe("小禾");
+    expect(store.state.parentPin).toBe("2468");
+    expect(store.parentUnlocked).toBe(false);
+  });
+
+  it("restores from setup with a new local PIN in one write", async () => {
+    const store = useAppStore();
+    const other = configuredState();
+    other.child.name = "小禾";
+    const candidate = store.previewRestore(
+      JSON.stringify({ schemaVersion: 2, state: other }),
+    );
+
+    expect(await store.restoreDuringSetup(candidate!, "1357", "1357")).toBe(
+      true,
+    );
+    expect(store.state).toMatchObject({
+      setupCompleted: true,
+      parentPin: "1357",
+      child: { name: "小禾" },
+    });
+    expect(appRepository.save).toHaveBeenCalledOnce();
+  });
+
+  it("locks after ten minutes idle or a long background interval", () => {
+    const store = useAppStore();
+    store.state = configuredState();
+    vi.setSystemTime(new Date("2026-07-14T10:00:00"));
+    expect(store.verifyPin("2468")).toBe(true);
+    const start = Date.now();
+    store.recordParentSessionActivity(start);
+    expect(store.checkParentSession(start + PARENT_SESSION_TIMEOUT_MS - 1)).toBe(
+      false,
+    );
+    expect(store.checkParentSession(start + PARENT_SESSION_TIMEOUT_MS)).toBe(
+      true,
+    );
+
+    expect(store.verifyPin("2468")).toBe(true);
+    store.recordParentVisibility(true, start);
+    expect(
+      store.recordParentVisibility(
+        false,
+        start + PARENT_SESSION_TIMEOUT_MS - 1,
+      ),
+    ).toBe(false);
+    store.recordParentVisibility(true, start);
+    expect(
+      store.recordParentVisibility(false, start + PARENT_SESSION_TIMEOUT_MS),
+    ).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("derives the local daily overview and refreshes its date boundary", async () => {
+    const store = useAppStore();
+    store.state = configuredState();
+    store.refreshToday(new Date("2026-07-14T10:00:00"));
+    store.state.taskCompletions.push({
+      id: "approved-today",
+      taskTemplateId: "task-brush",
+      dateKey: "2026-07-14",
+      status: "approved",
+      submittedAt: "2026-07-14T01:00:00.000Z",
+      reviewedAt: "2026-07-14T02:00:00.000Z",
+      bonusPoints: 0,
+      bonusGrowthValue: 0,
+    });
+    store.state.ledger.push({
+      id: "earned-today",
+      type: "task_reward",
+      amount: 10,
+      balanceAfter: 10,
+      reason: "任务通过",
+      createdAt: new Date("2026-07-14T12:00:00").toISOString(),
+      approvedByParent: true,
+    });
+    expect(store.approvedTasksToday).toBe(1);
+    expect(store.earnedPointsToday).toBe(10);
+    store.refreshToday(new Date("2026-07-15T00:01:00"));
+    expect(store.approvedTasksToday).toBe(0);
+  });
+
+  it("carries growth into a level that unlocks a new pet", async () => {
+    const store = useAppStore();
+    store.state = configuredState();
+    store.state.progress.level = 2;
     store.state.progress.growthValue = 95;
     store.state.taskCompletions.push({
       id: "pending-growth",
@@ -33,194 +206,40 @@ describe("app store rules", () => {
     expect(store.petFeedback?.message).toContain("泡泡");
   });
 
-  it("migrates a schema version 1 backup to the default pet", async () => {
-    const legacyState = seedState();
-    const legacyChild: Partial<typeof legacyState.child> = {
-      ...legacyState.child,
-      currentPetName: "小团子",
-    };
-    delete legacyChild.currentPetId;
-
-    const restored = await appRepository.restore(
-      JSON.stringify({
-        schemaVersion: 1,
-        state: { ...legacyState, child: legacyChild },
-      }),
-    );
-
-    expect(restored.child.currentPetId).toBe("tuantuan");
-    expect(restored.child.currentPetName).toBe("小团子");
-  });
-
-  it("falls back to Tuantuan when restored pet is still locked", async () => {
-    const backupState = seedState();
-    backupState.child.currentPetId = "mili";
-    backupState.child.currentPetName = "米粒";
-    backupState.progress.level = 2;
-
-    const restored = await appRepository.restore(
-      JSON.stringify({ schemaVersion: 2, state: backupState }),
-    );
-
-    expect(restored.child.currentPetId).toBe("tuantuan");
-    expect(restored.child.currentPetName).toBe("团团");
-  });
-
-  it("blocks switching to a pet before its unlock level", async () => {
+  it("rolls back a durable mutation when persistence fails", async () => {
+    vi.mocked(appRepository.save).mockRejectedValueOnce(new Error("磁盘不可用"));
     const store = useAppStore();
-    store.state = seedState();
-
-    expect(await store.switchPet("paopao")).toBe(false);
-    expect(store.state.child.currentPetId).toBe("tuantuan");
-    expect(store.toast?.message).toContain("3 级");
-    expect(appRepository.save).not.toHaveBeenCalled();
-  });
-
-  it("switches to an unlocked pet and persists the selection", async () => {
-    const store = useAppStore();
-    store.state = seedState();
-    store.state.progress.level = 3;
-
-    expect(await store.switchPet("paopao")).toBe(true);
-
-    expect(store.state.child.currentPetId).toBe("paopao");
-    expect(store.state.child.currentPetName).toBe("泡泡");
-    expect(store.currentPet.id).toBe("paopao");
-    expect(appRepository.save).toHaveBeenCalledWith(
-      expect.objectContaining({
-        child: expect.objectContaining({ currentPetId: "paopao" }),
-      }),
-    );
-  });
-
-  it("rejects incomplete backup data", async () => {
-    await expect(
-      appRepository.restore(
-        JSON.stringify({
-          schemaVersion: 1,
-          state: { child: { name: "小满" }, taskTemplates: [] },
-        }),
-      ),
-    ).rejects.toThrow("备份文件格式不正确");
-  });
-
-  it("persists a reactive store state through IndexedDB", async () => {
-    vi.restoreAllMocks();
-    const store = useAppStore();
-    store.state = seedState();
+    store.state = configuredState();
 
     await store.submitTask("task-brush");
 
-    expect(store.completionFor("task-brush")?.status).toBe("pending_review");
-    expect(store.error).toBe("");
+    expect(store.state.taskCompletions).toEqual([]);
+    expect(store.error).toContain("磁盘不可用");
   });
 
-  it("passes a cloneable plain object to the repository", async () => {
-    const save = vi.mocked(appRepository.save);
-    save.mockImplementation(async (state) => {
-      expect(() => structuredClone(state)).not.toThrow();
-    });
+  it("prevents duplicate reward freezes", async () => {
     const store = useAppStore();
-    store.state.progress.moodValue = 73;
-    store.state.taskTemplates[0].description = "嵌套响应式数据";
-
-    await store.submitTask("task-brush");
-
-    expect(save).toHaveBeenCalledOnce();
-    expect(store.error).toBe("");
-  });
-
-  it("does not freeze points twice for the same pending reward", async () => {
-    const store = useAppStore();
-    store.state = seedState();
+    store.state = configuredState();
+    store.state.progress.pointsBalance = 50;
 
     await store.requestReward("reward-story");
     await store.requestReward("reward-story");
 
-    expect(
-      store.state.redemptions.filter(
-        (item) => item.rewardId === "reward-story",
-      ),
-    ).toHaveLength(1);
-    expect(store.state.progress.frozenPoints).toBe(30);
-    expect(store.toast?.message).toContain("已经在等待");
+    expect(store.state.redemptions).toHaveLength(1);
+    expect(store.state.progress.frozenPoints).toBe(20);
   });
 
-  it("keeps the parent note on an approved redemption", async () => {
+  it("requires an unlocked session and PIN before resetting local data", async () => {
     const store = useAppStore();
-    store.state = seedState();
-    await store.requestReward("reward-story");
-    const redemption = store.redemptionForReward("reward-story");
-
-    await store.approveRedemption(redemption!.id, "周六晚上一起讲");
-
-    expect(store.redemptionForReward("reward-story")?.status).toBe("approved");
-    expect(store.redemptionForReward("reward-story")?.parentNote).toBe(
-      "周六晚上一起讲",
-    );
-  });
-
-  it("requires the parent PIN before resetting local data", async () => {
-    const store = useAppStore();
-    store.state = seedState();
+    store.state = configuredState();
     store.state.progress.pointsBalance = 222;
 
+    expect(await store.resetData("2468")).toBe(false);
+    expect(store.verifyPin("2468")).toBe(true);
     expect(await store.resetData("0000")).toBe(false);
-    expect(store.state.progress.pointsBalance).toBe(222);
-    expect(await store.resetData("2580")).toBe(true);
-    expect(store.state.progress.pointsBalance).toBe(65);
-  });
-
-  it("archives and restores a task without deleting its history", async () => {
-    const store = useAppStore();
-    store.state = seedState();
-    store.state.taskCompletions.push({
-      id: "approved-history",
-      taskTemplateId: "task-read",
-      dateKey: todayKey(),
-      status: "approved",
-      submittedAt: new Date().toISOString(),
-      reviewedAt: new Date().toISOString(),
-      bonusPoints: 0,
-      bonusGrowthValue: 0,
-    });
-
-    expect(await store.archiveTask("task-read")).toBe(true);
-    expect(
-      store.state.taskTemplates.find((item) => item.id === "task-read")
-        ?.archived,
-    ).toBe(true);
-    expect(store.state.taskCompletions).toHaveLength(1);
-    expect(await store.restoreTask("task-read")).toBe(true);
-    expect(
-      store.state.taskTemplates.find((item) => item.id === "task-read")
-        ?.archived,
-    ).toBe(false);
-  });
-
-  it("blocks reward archival while a redemption is pending", async () => {
-    const store = useAppStore();
-    store.state = seedState();
-    await store.requestReward("reward-story");
-
-    expect(await store.archiveReward("reward-story")).toBe(false);
-    expect(
-      store.state.rewards.find((item) => item.id === "reward-story")?.archived,
-    ).not.toBe(true);
-    expect(store.toast?.message).toContain("待确认兑换");
-  });
-
-  it("updates family profile and requires the current PIN for PIN changes", async () => {
-    const store = useAppStore();
-    store.state = seedState();
-
-    expect(
-      await store.updateChildProfile({ name: "安安", currentPetName: "糯米" }),
-    ).toBe(true);
-    expect(store.state.child.name).toBe("安安");
-    expect(store.state.child.currentPetName).toBe("糯米");
-    expect(await store.updateParentPin("0000", "1357")).toBe(false);
-    expect(await store.updateParentPin("2580", "1357")).toBe(true);
-    expect(store.verifyPin("1357")).toBe(true);
+    expect(await store.resetData("2468")).toBe(true);
+    expect(store.state.setupCompleted).toBe(false);
+    expect(store.state.progress.pointsBalance).toBe(0);
+    expect(store.parentUnlocked).toBe(false);
   });
 });

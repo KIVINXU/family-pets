@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import {
   Plus,
@@ -11,6 +11,13 @@ import {
   RotateCcw,
 } from "lucide-vue-next";
 import { useAppStore } from "../store";
+import ConfirmDialog from "../components/ConfirmDialog.vue";
+import {
+  dismissBackupReminder,
+  getBackupPreferences,
+  isBackupReminderDue,
+  recordBackupExport,
+} from "../backup-preferences";
 
 const store = useAppStore();
 const router = useRouter();
@@ -33,12 +40,42 @@ const editingRewardId = ref<string | null>(null);
 const rewardForm = reactive({ title: "", description: "", pointsCost: 50 });
 const ledger = computed(() => [...store.state.ledger].reverse());
 const ledgerFilter = ref<"all" | "earn" | "redeem">("all");
-const resetPin = ref("");
 const childForm = reactive({
   name: store.state.child.name,
   currentPetName: store.state.child.currentPetName,
 });
-const pinForm = reactive({ current: "", next: "" });
+const pinForm = reactive({ current: "", next: "", confirm: "" });
+const backupPreferences = ref(getBackupPreferences());
+const confirmationPin = ref("");
+const confirmationBusy = ref(false);
+type Confirmation = {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  danger?: boolean;
+  pinRequired?: boolean;
+  action: (pin: string) => Promise<boolean | void>;
+};
+const confirmation = ref<Confirmation | null>(null);
+const backupReminderDue = computed(() =>
+  isBackupReminderDue(backupPreferences.value),
+);
+const lastExportLabel = computed(() =>
+  backupPreferences.value.lastExportAt
+    ? new Date(backupPreferences.value.lastExportAt).toLocaleString("zh-CN")
+    : "尚未导出",
+);
+
+watch(
+  [taskForm, rewardForm, childForm, pinForm, reviewDrafts, redemptionDrafts],
+  () => store.setFormDirty("parent-center", true),
+  { deep: true },
+);
+watch(
+  [confirmationPin, confirmation],
+  () => store.setFormDirty("parent-center", true),
+);
+onBeforeUnmount(() => store.setFormDirty("parent-center", false));
 const filteredLedger = computed(() =>
   ledger.value.filter((item) => {
     if (ledgerFilter.value === "earn")
@@ -110,15 +147,27 @@ const rewardBy = (id: string) =>
 const draftFor = (id: string) =>
   (reviewDrafts[id] ??= { note: "", bonusPoints: 0, bonusGrowth: 0 });
 
-async function approveTask(id: string) {
+function approveTask(id: string) {
   const draft = draftFor(id);
-  await store.approveTask(
-    id,
-    Number(draft.bonusPoints) || 0,
-    Number(draft.bonusGrowth) || 0,
-    draft.note.trim(),
+  const task = taskBy(
+    store.pendingTasks.find((item) => item.id === id)?.taskTemplateId ?? "",
   );
-  delete reviewDrafts[id];
+  const points = (task?.pointsReward ?? 0) + (Number(draft.bonusPoints) || 0);
+  const growth = (task?.growthReward ?? 0) + (Number(draft.bonusGrowth) || 0);
+  confirmation.value = {
+    title: `通过“${task?.title ?? "这个任务"}”？`,
+    message: `确认后将给孩子增加 ${points} 积分和 ${growth} 成长。`,
+    confirmLabel: "确认通过",
+    action: async () => {
+      await store.approveTask(
+        id,
+        Number(draft.bonusPoints) || 0,
+        Number(draft.bonusGrowth) || 0,
+        draft.note.trim(),
+      );
+      delete reviewDrafts[id];
+    },
+  };
 }
 
 async function rejectTask(id: string) {
@@ -127,9 +176,18 @@ async function rejectTask(id: string) {
   delete reviewDrafts[id];
 }
 
-async function approveRedemption(id: string) {
-  await store.approveRedemption(id, redemptionDrafts[id]?.trim() ?? "");
-  delete redemptionDrafts[id];
+function approveRedemption(id: string) {
+  const item = store.pendingRedemptions.find((redemption) => redemption.id === id);
+  const reward = rewardBy(item?.rewardId ?? "");
+  confirmation.value = {
+    title: `同意兑换“${reward?.title ?? "这个奖励"}”？`,
+    message: `确认后将扣除 ${item?.pointsCost ?? 0} 积分，并进入待兑现状态。`,
+    confirmLabel: "确认兑换",
+    action: async () => {
+      await store.approveRedemption(id, redemptionDrafts[id]?.trim() ?? "");
+      delete redemptionDrafts[id];
+    },
+  };
 }
 
 async function rejectRedemption(id: string) {
@@ -212,9 +270,17 @@ async function saveChildProfile() {
 }
 
 async function saveParentPin() {
-  if (await store.updateParentPin(pinForm.current, pinForm.next)) {
+  if (
+    await store.updateParentPin(
+      pinForm.current,
+      pinForm.next,
+      pinForm.confirm,
+    )
+  ) {
     pinForm.current = "";
     pinForm.next = "";
+    pinForm.confirm = "";
+    await router.replace("/parent/unlock");
   }
 }
 
@@ -229,17 +295,81 @@ function download() {
   link.download = "family-pets-backup.json";
   link.click();
   URL.revokeObjectURL(link.href);
+  recordBackupExport();
+  backupPreferences.value = getBackupPreferences();
+}
+function requestDownload() {
+  confirmation.value = {
+    title: "导出家庭备份？",
+    message: "文件包含孩子昵称、任务、积分和兑换记录，但不包含家长 PIN。请保存在可信的位置。",
+    confirmLabel: "确认导出",
+    action: async () => download(),
+  };
 }
 async function upload(event: Event) {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
-  if (file && confirm("恢复会覆盖当前数据，确定继续吗？"))
-    await store.restore(await file.text());
+  if (file) {
+    const candidate = store.previewRestore(await file.text());
+    if (candidate) {
+      confirmation.value = {
+        title: `恢复 ${candidate.summary.childName} 的备份？`,
+        message: `导出于 ${candidate.summary.exportedAt ? new Date(candidate.summary.exportedAt).toLocaleString("zh-CN") : "未知时间"}；Lv.${candidate.summary.level}，${candidate.summary.points} 积分，${candidate.summary.taskCount} 个任务、${candidate.summary.rewardCount} 个奖励、${candidate.summary.historyCount} 条历史。确认后会覆盖当前家庭数据。`,
+        confirmLabel: "确认恢复",
+        danger: true,
+        pinRequired: true,
+        action: async (pin) => {
+          const restored = await store.confirmRestore(candidate, pin);
+          if (restored) await router.replace("/parent/unlock");
+          return restored;
+        },
+      };
+    }
+  }
   input.value = "";
 }
-async function resetLocalData() {
-  if (!confirm("这会清除当前任务进度、兑换和积分记录，确定继续吗？")) return;
-  if (await store.resetData(resetPin.value)) resetPin.value = "";
+function resetLocalData() {
+  confirmation.value = {
+    title: "重置全部本地数据？",
+    message: "这会清除当前任务进度、兑换和积分记录，并返回首次设置。操作后无法撤销。",
+    confirmLabel: "确认重置",
+    danger: true,
+    pinRequired: true,
+    action: async (pin) => {
+      const reset = await store.resetData(pin);
+      if (reset) {
+        await router.replace("/setup");
+      }
+      return reset;
+    },
+  };
+}
+function fulfillRedemption(id: string) {
+  const item = store.unfulfilledRedemptions.find((entry) => entry.id === id);
+  const reward = rewardBy(item?.rewardId ?? "");
+  confirmation.value = {
+    title: `标记“${reward?.title ?? "这个奖励"}”已兑现？`,
+    message: "确认后孩子端会显示奖励已经兑现。",
+    confirmLabel: "标记已兑现",
+    action: async () => {
+      await store.fulfillRedemption(id);
+    },
+  };
+}
+async function runConfirmation() {
+  if (!confirmation.value) return;
+  confirmationBusy.value = true;
+  const result = await confirmation.value.action(confirmationPin.value);
+  confirmationBusy.value = false;
+  if (result !== false) closeConfirmation();
+}
+function closeConfirmation() {
+  confirmation.value = null;
+  confirmationPin.value = "";
+}
+function dismissReminder() {
+  dismissBackupReminder();
+  backupPreferences.value = getBackupPreferences();
 }
 </script>
 
@@ -384,7 +514,7 @@ async function resetLocalData() {
           <b>{{ rewardBy(item.rewardId)?.title }}</b
           ><small>{{ item.parentNote }}</small>
         </div>
-        <button @click="store.fulfillRedemption(item.id)">标记已兑现</button>
+        <button @click="fulfillRedemption(item.id)">标记已兑现</button>
       </article>
     </section>
 
@@ -580,6 +710,14 @@ async function resetLocalData() {
                 type="password"
                 required
             /></label>
+            <label
+              >再次输入新 PIN<input
+                v-model="pinForm.confirm"
+                inputmode="numeric"
+                maxlength="4"
+                type="password"
+                required
+            /></label>
             <button>更新 PIN</button>
           </form>
         </div>
@@ -600,8 +738,16 @@ async function resetLocalData() {
           ><strong>{{ store.state.progress.pointsBalance }}</strong>
         </div>
       </div>
+      <aside v-if="backupReminderDue" class="backup-reminder">
+        <div>
+          <b>记得保存一份家庭备份</b>
+          <small>本应用只保存在这台设备。上次导出：{{ lastExportLabel }}</small>
+        </div>
+        <button class="secondary" @click="dismissReminder">关闭提醒</button>
+      </aside>
+      <p class="backup-time">上次导出时间：{{ lastExportLabel }}</p>
       <div class="backup-actions">
-        <button @click="download"><Download />导出备份</button
+        <button @click="requestDownload"><Download />导出备份</button
         ><label class="button secondary"
           ><Upload />恢复备份<input
             type="file"
@@ -647,14 +793,7 @@ async function resetLocalData() {
           <b>重置本地数据</b>
           <p>仅用于重新开始或清理演示数据，操作后无法撤销。</p>
         </div>
-        <label
-          >再次输入家长 PIN<input
-            v-model="resetPin"
-            inputmode="numeric"
-            maxlength="4"
-            type="password"
-        /></label>
-        <button :disabled="resetPin.length !== 4" @click="resetLocalData">
+        <button @click="resetLocalData">
           重置数据
         </button>
       </section>
@@ -716,5 +855,26 @@ async function resetLocalData() {
         >
       </article>
     </section>
+    <ConfirmDialog
+      v-if="confirmation"
+      :title="confirmation.title"
+      :message="confirmation.message"
+      :confirm-label="confirmation.confirmLabel"
+      :danger="confirmation.danger"
+      :busy="confirmationBusy"
+      @cancel="closeConfirmation"
+      @confirm="runConfirmation"
+    >
+      <label v-if="confirmation.pinRequired" class="dialog-pin-field">
+        再次输入当前家长 PIN
+        <input
+          v-model="confirmationPin"
+          type="password"
+          inputmode="numeric"
+          maxlength="4"
+          autocomplete="current-password"
+        />
+      </label>
+    </ConfirmDialog>
   </main>
 </template>

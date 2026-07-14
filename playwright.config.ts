@@ -12,13 +12,23 @@ process.env.no_proxy = process.env.NO_PROXY;
 
 export default defineConfig({
   testDir: "./tests",
+  testIgnore: "**/pwa-offline.spec.ts",
   fullyParallel: true,
   reporter: "line",
   use: {
     baseURL: "http://127.0.0.1:4174",
     trace: "retain-on-failure",
   },
-  projects: [{ name: "mobile-chromium", use: { ...devices["Pixel 7"] } }],
+  projects: [
+    {
+      name: "mobile-chromium",
+      use: {
+        ...devices["Pixel 7"],
+        locale: "zh-CN",
+        timezoneId: "Asia/Shanghai",
+      },
+    },
+  ],
   webServer: {
     command: "npm run dev -- --host 127.0.0.1 --port 4174",
     url: "http://127.0.0.1:4174",
